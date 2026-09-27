@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#4c8bf5" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>Obsidian音声メモ</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --text: #e8eaed; --muted: #9aa0a6;
+      --accent: #4c8bf5; --danger: #c44; --ok: #5bb98b; --border: #2a2f3a;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text);
+      display: flex; flex-direction: column; max-width: 560px; margin: 0 auto;
+      padding: 12px 16px calc(16px + var(--safe-bottom));
+    }
+    h1 { font-size: 1.2rem; margin: 4px 0 4px; }
+    .sub { color: var(--muted); font-size: 0.85rem; line-height: 1.4; margin: 0 0 10px; }
+    .settings {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 10px 12px; margin-bottom: 10px;
+    }
+    .settings label { display: block; font-size: 0.75rem; color: var(--muted); margin: 6px 0 4px; }
+    .settings input {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: #11151c; color: var(--text); font-size: 1rem;
+    }
+    .live-wrap {
+      flex: 1; min-height: 38vh; background: #12151c; border: 1px solid var(--border);
+      border-radius: 14px; padding: 12px; overflow: auto; margin-bottom: 12px;
+    }
+    .label { font-size: 0.7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .badge {
+      display: inline-block; margin: 8px 0; font-size: 0.8rem; padding: 4px 10px;
+      border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+    }
+    .badge.on { color: var(--ok); border-color: #2f5a45; }
+    .live {
+      font-size: 1.15rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+      min-height: 5em;
+    }
+    .live .interim { color: var(--muted); font-style: italic; }
+    .controls { display: flex; flex-direction: column; gap: 10px; }
+    button {
+      appearance: none; border: none; border-radius: 16px; padding: 18px 16px;
+      font-size: 1.15rem; font-weight: 700; cursor: pointer; width: 100%;
+    }
+    button#toggleBtn.idle { background: var(--accent); color: #fff; }
+    button#toggleBtn.rec { background: var(--danger); color: #fff; }
+    button.secondary {
+      background: #222733; color: var(--text); font-weight: 600; font-size: 1rem; padding: 14px;
+      border: 1px solid var(--border);
+    }
+    button:disabled { opacity: 0.45; }
+    .status { text-align: center; color: var(--muted); font-size: 0.9rem; min-height: 1.3em; }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: #e6b84d; }
+    .status.live { color: var(--accent); }
+    .saved-box {
+      display: none; background: var(--panel); border: 1px solid #2f5a45;
+      border-radius: 12px; padding: 12px; margin-top: 4px;
+    }
+    .saved-box.show { display: block; }
+    .hint { color: var(--muted); font-size: 0.78rem; line-height: 1.45; margin-top: 8px; }
+    code { background: #222733; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Obsidian音声メモ</h1>
+  <p class="sub">iPhone Safari / PWA。ライブは端末の音声認識（無料）。停止後に Obsidian の Inbox へ保存。</p>
+
+  <div class="settings">
+    <label for="vaultInput">Obsidian の Vault 名（フォルダ名そのまま）</label>
+    <input id="vaultInput" type="text" inputmode="text" autocomplete="off" placeholder="例: Vault" />
+    <label for="folderInput">Inbox フォルダ（Vault内パス）</label>
+    <input id="folderInput" type="text" value="01_Inbox" autocomplete="off" />
+    <label for="titleInput">ノートタイトル</label>
+    <input id="titleInput" type="text" value="Voice note" autocomplete="off" />
+  </div>
+
+  <div class="live-wrap">
+    <div class="label">ライブ文字起こし</div>
+    <div class="badge" id="badge">Stopped</div>
+    <div class="live" id="live">録音を開始するとここに表示されます。</div>
+  </div>
+
+  <div class="controls">
+    <div class="status" id="status">準備中…</div>
+    <button id="toggleBtn" class="idle" type="button">録音スタート</button>
+    <button id="saveBtn" class="secondary" type="button" disabled>Obsidian に保存</button>
+    <button id="shareBtn" class="secondary" type="button" disabled>共有シートで保存</button>
+    <div class="saved-box" id="savedBox">
+      <div class="label">保存</div>
+      <div id="savedMsg"></div>
+    </div>
+    <p class="hint">
+      ホーム画面に追加: Safari共有 →「ホーム画面に追加」。<br />
+      Vault名は Obsidian 左サイドバーの Vault 名（iCloud同期なら多くの場合 <code>Vault</code>）。
+      ウェブページから iCloud フォルダへ直接書き込みはできないため、<code>obsidian://</code> または共有シートを使います。
+    </p>
+  </div>
+
+  <script>
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    const vaultInput = document.getElementById('vaultInput');
+    const folderInput = document.getElementById('folderInput');
+    const titleInput = document.getElementById('titleInput');
+    const liveEl = document.getElementById('live');
+    const badge = document.getElementById('badge');
+    const statusEl = document.getElementById('status');
+    const toggleBtn = document.getElementById('toggleBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const savedBox = document.getElementById('savedBox');
+    const savedMsg = document.getElementById('savedMsg');
+
+    let recognition = null;
+    let wantListen = false;
+    let recording = false;
+    let finals = [];
+    let interim = '';
+
+    // Defaults from known Mac setup (iCloud vault folder name = Vault)
+    const LS_VAULT = 'obsVoice.vault';
+    const LS_FOLDER = 'obsVoice.folder';
+    vaultInput.value = localStorage.getItem(LS_VAULT) || 'Vault';
+    folderInput.value = localStorage.getItem(LS_FOLDER) || '01_Inbox';
+    vaultInput.addEventListener('change', () => localStorage.setItem(LS_VAULT, vaultInput.value.trim()));
+    folderInput.addEventListener('change', () => localStorage.setItem(LS_FOLDER, folderInput.value.trim()));
+
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+    }
+    function setBadge(text, on) {
+      badge.textContent = text;
+      badge.className = 'badge' + (on ? ' on' : '');
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function renderLive() {
+      const f = escapeHtml(finals.join(''));
+      const i = interim ? '<span class="interim">' + escapeHtml(interim) + '</span>' : '';
+      liveEl.innerHTML = (f + (f && i ? ( /[\u3040-\u30ff\u4e00-\u9fff]$/.test(finals.join('')) ? '' : ' ') : '') + i) || '…';
+    }
+    function getTranscript() {
+      return (finals.join('') + (interim || '')).replace(/\s+/g, ' ').trim();
+    }
+    function updateSaveEnabled() {
+      const ok = !!getTranscript();
+      saveBtn.disabled = !ok;
+      shareBtn.disabled = !ok;
+    }
+    function stampName() {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      const base = (titleInput.value.trim() || 'Voice note').replace(/[\\/:*?"<>|]/g, '-');
+      return base + '-' + d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    }
+    function buildMarkdown(transcript) {
+      const title = titleInput.value.trim() || 'Voice note';
+      const now = new Date();
+      return [
+        '---',
+        'title: "' + title.replace(/"/g, "'") + '"',
+        'date: ' + now.toISOString().slice(0, 10),
+        'created: ' + now.toISOString(),
+        'tags:',
+        '  - voice',
+        '  - transcript',
+        '  - iphone-webspeech',
+        'source: iphone-obsidian-recorder',
+        'language: ja',
+        '---',
+        '',
+        '# ' + title,
+        '',
+        transcript,
+        ''
+      ].join('\n');
+    }
+
+    function ensureRecognition() {
+      if (!SpeechRecognition) return null;
+      if (recognition) return recognition;
+      const rec = new SpeechRecognition();
+      rec.lang = 'ja-JP';
+      rec.interimResults = true;
+      // iOS: continuous true often fails to finalize; use false + onend restart
+      rec.continuous = !isIOS;
+      rec.maxAlternatives = 1;
+      rec.onstart = () => setBadge('Listening…', true);
+      rec.onresult = (event) => {
+        let interimBuf = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          const t = (r[0] && r[0].transcript) ? r[0].transcript : '';
+          if (r.isFinal) finals.push(t);
+          else interimBuf += t;
+        }
+        interim = interimBuf;
+        renderLive();
+        updateSaveEnabled();
+      };
+      rec.onerror = (e) => {
+        const err = e.error || 'error';
+        if (err === 'no-speech' || err === 'aborted') return;
+        setStatus('認識エラー: ' + err, 'warn');
+      };
+      rec.onend = () => {
+        if (wantListen) {
+          setTimeout(() => {
+            if (!wantListen) return;
+            try { rec.start(); }
+            catch (_) {
+              setTimeout(() => { try { if (wantListen) rec.start(); } catch (e2) {} }, 250);
+            }
+          }, isIOS ? 220 : 80);
+        } else {
+          setBadge('Stopped', false);
+        }
+      };
+      recognition = rec;
+      return rec;
+    }
+
+    async function start() {
+      finals = [];
+      interim = '';
+      savedBox.classList.remove('show');
+      renderLive();
+      // mic warm-up helps iOS first recognition
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch (e) {
+        setStatus('マイク許可が必要です: ' + (e.message || e), 'warn');
+        return;
+      }
+      const rec = ensureRecognition();
+      if (!rec) {
+        setStatus('このSafariは Web Speech 非対応です', 'warn');
+        return;
+      }
+      wantListen = true;
+      recording = true;
+      try { rec.start(); } catch (e) {
+        setStatus('開始失敗: ' + (e.message || e), 'warn');
+        wantListen = false;
+        recording = false;
+        return;
+      }
+      toggleBtn.textContent = '停止';
+      toggleBtn.className = 'rec';
+      setStatus('録音中（ライブ表示）', 'live');
+      updateSaveEnabled();
+    }
+
+    function stop() {
+      wantListen = false;
+      recording = false;
+      try { if (recognition) recognition.stop(); } catch (_) {}
+      interim = '';
+      renderLive();
+      toggleBtn.textContent = '録音スタート';
+      toggleBtn.className = 'idle';
+      setBadge('Stopped', false);
+      setStatus(getTranscript() ? '停止 — Obsidianに保存できます' : '停止 — 文字がありません', getTranscript() ? 'ok' : 'warn');
+      updateSaveEnabled();
+    }
+
+    function openObsidian() {
+      const transcript = getTranscript();
+      if (!transcript) return;
+      const vault = vaultInput.value.trim() || 'Vault';
+      const folder = (folderInput.value.trim() || '01_Inbox').replace(/^\/+|\/+$/g, '');
+      const name = stampName();
+      const filePath = folder + '/' + name;
+      const md = buildMarkdown(transcript);
+      localStorage.setItem(LS_VAULT, vault);
+      localStorage.setItem(LS_FOLDER, folder);
+
+      // Prefer URI; long content may hit URL limits on iOS
+      const url = 'obsidian://new?vault=' + encodeURIComponent(vault) +
+        '&file=' + encodeURIComponent(filePath) +
+        '&content=' + encodeURIComponent(md);
+
+      if (url.length > 1800) {
+        setStatus('文章が長いので共有シート／クリップボード経由にします', 'warn');
+        fallbackLong(md, name, vault, filePath);
+        return;
+      }
+      window.location.href = url;
+      savedMsg.textContent = 'Obsidian を開きました: ' + filePath + '.md（Vault: ' + vault + '）';
+      savedBox.classList.add('show');
+      setStatus('Obsidian に送信しました', 'ok');
+    }
+
+    async function fallbackLong(md, name, vault, filePath) {
+      try {
+        await navigator.clipboard.writeText(md);
+      } catch (_) {}
+      // open empty-ish note then user can paste if needed; also try share
+      const shortUrl = 'obsidian://new?vault=' + encodeURIComponent(vault) +
+        '&file=' + encodeURIComponent(filePath) +
+        '&content=' + encodeURIComponent('（長文のためクリップボードにコピー済み。ここに貼り付けてください）\n');
+      window.location.href = shortUrl;
+      savedMsg.textContent = '長文のため本文をコピー済み。Obsidianノートに貼り付けてください: ' + filePath;
+      savedBox.classList.add('show');
+      if (navigator.share) {
+        try {
+          const file = new File([md], name + '.md', { type: 'text/markdown' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: name });
+          }
+        } catch (_) {}
+      }
+    }
+
+    async function shareMd() {
+      const transcript = getTranscript();
+      if (!transcript) return;
+      const name = stampName();
+      const md = buildMarkdown(transcript);
+      const file = new File([md], name + '.md', { type: 'text/markdown' });
+      try {
+        if (navigator.share) {
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: name });
+          } else {
+            await navigator.share({ text: md, title: name });
+          }
+          savedMsg.textContent = '共有シートを開きました。Obsidian または「ファイル」→ iCloud の Vault/01_Inbox へ保存してください。';
+          savedBox.classList.add('show');
+          setStatus('共有しました', 'ok');
+        } else {
+          await navigator.clipboard.writeText(md);
+          setStatus('クリップボードにコピーしました', 'ok');
+        }
+      } catch (e) {
+        if (String(e.name) === 'AbortError') return;
+        setStatus('共有失敗: ' + (e.message || e), 'warn');
+      }
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      if (recording) stop();
+      else start();
+    });
+    saveBtn.addEventListener('click', () => { if (recording) stop(); openObsidian(); });
+    shareBtn.addEventListener('click', () => { if (recording) stop(); shareMd(); });
+
+    if (!SpeechRecognition) {
+      setStatus('Web Speech 非対応のブラウザです（iPhone Safari を使ってください）', 'warn');
+      toggleBtn.disabled = true;
+    } else if (!window.isSecureContext) {
+      setStatus('マイクには HTTPS（またはlocalhost）が必要です', 'warn');
+    } else {
+      setStatus('準備完了 — Vault名を確認して録音スタート', 'ok');
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
